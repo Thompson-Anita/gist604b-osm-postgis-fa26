@@ -61,14 +61,229 @@ def setup_osm_postgis(
 
     # TODO: Implement this function
     # Step 1: Setup data directory
+import os
+import requests
+import subprocess
+import psycopg2
+import zipfile
+
+print("Libraries imported!")
+
     # Step 2: Download shapefile ZIP data
+ # URL for OSM data download (Geofabrik - shapefile)
+osm_url = "https://download.geofabrik.de/north-america/us/arizona-latest-free.shp.zip"
+
+# Define local directory to store OSM data
+data_path = f"../data/{db_name}"
+
+# Create directory if it does not exist
+os.makedirs(data_path, exist_ok=True)
+
+# Construct full file path using the filename from the URL
+zip_path = os.path.join(data_path, osm_url.split("/")[-1])
+
+# Download file only if it does not already exist
+if not os.path.exists(zip_path):
+    print("Downloading OSM data...")
+    print("URL:", osm_url)
+
+    # Send HTTP request (stream=True downloads in chunks)
+    response = requests.get(osm_url, stream=True, timeout=300)
+    # Raise error if download fails
+    response.raise_for_status()
+    
+    # Get total file size (if available) for progress tracking
+    file_size = int(response.headers.get("content-length", 0))
+    if file_size > 0:
+        print(f"File size: {file_size / (1024 * 1024):.1f} MB")
+
+    downloaded = 0
+    
+    # Open file in binary write mode
+    with open(zip_path, "wb") as f:
+        # Download file in chunks to avoid loading entire file into memory
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
+                downloaded += len(chunk)
+                
+                # Display progress as percentage (if file size is known)
+                if file_size > 0:
+                    progress = downloaded / file_size * 100
+                    print(f"\rProgress: {progress:.1f}%", end="", flush=True)
+
+    print("\nDownload complete")
+    print("Saved to:", zip_path)
+else:
+    # Skip download if file already exists locally
+    print("File already exists:")
+    print(zip_path)
+
     # Step 3: Connect to PostgreSQL (default database)
+# Establish a connection to the postgres database
+conn = psycopg2.connect(
+    dbname="postgres",
+    user="postgres",
+    password="postgres",
+    host="localhost",
+    port=5432
+)
+
+# Every SQL statement is executed immediately
+conn.autocommit = True
+
+# Open a cursor to perform database operations
+cur = conn.cursor()
+
+# Check current database by using PostgreSQL built-in function
+cur.execute("SELECT current_database();")
+
+# Use fetchone() to return one row from the result of the query
+print("Current database:", cur.fetchone()[0])
+
+print("Connected to PostgreSQL server")
+
     # Step 4: Create the working database
+# Variable stores the new database name
+db_name = "arizona"
+
+# Check if database name already exists
+cur.execute(f"SELECT 1 FROM pg_database WHERE datname = '{db_name}';")
+
+# fetchone() returns a row if it exists, otherwise None
+exists = cur.fetchone()
+
+if not exists:
+    cur.execute(f"CREATE DATABASE {db_name};")
+    print(f"Database '{db_name}' created")
+else:
+    print(f"Database '{db_name}' already exists")
+
+# Close connection to 'postgres' before switching databases
+cur.close()
+conn.close()
+
+print("Closed connection to 'postgres'")
+
     # Step 5: Connect to the new database
+# Establish a connection to the working database
+conn = psycopg2.connect(
+    dbname=db_name,
+    user="postgres",
+    password="postgres",
+    host="localhost",
+    port=5432
+)
+
+# Every SQL statement is executed immediately
+conn.autocommit = True
+
+# Open a cursor to perform database operations
+cur = conn.cursor()
+
+print(f"Connected to database: {db_name}")
+
+# Create extension if it does not exist
+cur.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
+
+# Check PostGIS version
+cur.execute("SELECT PostGIS_version();")
+version = cur.fetchone()
+print("PostGIS version:", version)
+
     # Step 6: Enable PostGIS
+
+
     # Step 7: Unzip shapefile data
+# Extract ZIP contents
+extract_path = os.path.join(data_path, "shapefiles")
+
+if not os.path.exists(extract_path):
+    print("Extracting shapefiles...")
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        zip_ref.extractall(extract_path)
+    print("Extraction complete")
+    print("Extracted to:", extract_path)
+else:
+    print("Extracted folder already exists:")
+    print(extract_path)
+
     # Step 8: Load shapefiles into PostGIS using shp2pgsql
+# List of shapefiles to load
+load_shapefiles = [
+    "places_a", 
+    "railways",
+    "landuse_a",
+    "pois",
+    "adminareas_a",
+    "roads"]
+
+# Set password so shp2pgsql/psql does not prompt
+env = os.environ.copy()
+env["PGPASSWORD"] = "postgres"
+
+# Find all .shp files
+shp_files = [f for f in os.listdir(extract_path) if f.endswith(".shp")]
+
+# Loop through shapefiles and load them
+for shp_file in shp_files:
+    filename = os.path.splitext(shp_file)[0]
+
+    table_name = (
+        filename
+        .replace("gis_osm_", "")
+        .replace("_free_1", "")
+    )
+
+    # Skip shapefiles that are not in our load list
+    if table_name not in load_shapefiles: continue
+
+    shp_path = os.path.join(extract_path, shp_file)
+
+    print(f"\nLoading {table_name} from {filename}...")
+
+    cmd = f'shp2pgsql -d -I -s 4326 "{shp_path}" public.{table_name} | psql -h localhost -U postgres -d {db_name}'
+
+    print("Command:", cmd)
+
+    try:
+        subprocess.run(cmd, shell=True, env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        print(f"{table_name} loaded successfully")
+    except subprocess.CalledProcessError as e:
+        print(f"{table_name} failed")
+        print(e.stderr.splitlines()[-1])  # show only last error line
+
     # Step 9: Close connections
+# Create an SQL query to list all tables
+list_query = """
+SELECT table_name 
+FROM information_schema.tables
+WHERE table_schema = 'public'
+ORDER BY table_name;
+"""
+
+# Execute the query
+cur.execute(list_query)
+
+# Retrieve all table names
+tables = [t[0] for t in cur.fetchall()]
+print("Tables created:", tables)
+
+# Row counts for all tables (not hardcoded)
+for table in tables:
+    try:
+        cur.execute(f'SELECT COUNT(*) FROM "{table}";')
+        count = cur.fetchone()[0]
+        print(f"{table}: {count} rows")
+    except Exception as e:
+        print(f"{table}: error")
+        print(e)
+
+# Close the database connection
+cur.close()
+conn.close()
+
+print("Database connection closed")
 
     # IMPORTANT: Remove this line after correctly implementing the function.
     raise NotImplementedError("setup_osm_postgis() is not implemented. Complete this function before running it.")
