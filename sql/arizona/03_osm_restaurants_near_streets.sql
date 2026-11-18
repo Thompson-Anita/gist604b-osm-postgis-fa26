@@ -29,7 +29,7 @@ WITH restaurants AS (
 )
 
 SELECT
-    rds.name AS street_name,
+    name AS street_name,
     COUNT(DISTINCT r.geom) AS nearby_restaurant_count,
     ST_Union(rds.geom) AS geom
 FROM
