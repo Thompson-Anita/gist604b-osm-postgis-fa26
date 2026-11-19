@@ -13,6 +13,6 @@
 SELECT
     geom
 FROM
-    natural
+    pois
 WHERE
     fclass = 'peak';
