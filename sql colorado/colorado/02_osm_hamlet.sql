@@ -2,8 +2,8 @@
 -- Purpose: Extract hamlet locations for spatial distribution analysis
 
 -- Requirements:
--- - Use pois for point features
--- - Filter POIs where fclass = 'hamlet'
+-- - Use places for point features
+-- - Filter places where fclass = 'hamlet'
 -- - Return raw point geometries
 -- - (Optional) Clip to a specific region if needed
 
