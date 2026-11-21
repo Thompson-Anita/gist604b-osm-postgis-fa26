@@ -1,7 +1,6 @@
-
--- Query 3: Hamlets Near Waterways
--- Purpose: Identify waterways with the highest number
--- of nearby hamlets within one mile (1609.34 meters).
+-- Query 3: Streams Near Hamlets
+-- Purpose: Identify streams within one mile of hamlets.
+-- Distance: 1609.34 meters.
 
 WITH hamlets AS (
     SELECT
@@ -10,34 +9,42 @@ WITH hamlets AS (
         places
     WHERE
         fclass = 'hamlet'
+        AND geom IS NOT NULL
+),
+
+streams AS (
+    SELECT
+        name,
+        geom
+    FROM
+        waterways
+    WHERE
+        fclass = 'stream'
+        AND geom IS NOT NULL
+        AND name IS NOT NULL
 )
 
 SELECT
-    ww.name AS waterway_name,
-    COUNT(DISTINCT h.geom) AS nearby_hamlet_count,
-    ST_Union(ww.geom) AS geom
+    s.name AS stream_name,
+    COUNT(DISTINCT ST_AsEWKB(h.geom)) AS nearby_hamlet_count,
+    ST_Union(s.geom) AS geom
 
 FROM
-    waterways AS ww
+    streams AS s
 
 JOIN
     hamlets AS h
     ON ST_DWithin(
         h.geom::geography,
-        ww.geom::geography,
+        s.geom::geography,
         1609.34
     )
 
-WHERE
-    ww.name IS NOT NULL
-
 GROUP BY
-    ww.name
+    s.name
 
 HAVING
-    COUNT(DISTINCT h.geom) > 1
+    COUNT(DISTINCT ST_AsEWKB(h.geom)) > 1
 
 ORDER BY
     nearby_hamlet_count DESC;
--- 
-
