@@ -13,6 +13,6 @@
 SELECT
     geom
 FROM
-    places
+    "places"
 WHERE
     fclass = 'hamlet';
