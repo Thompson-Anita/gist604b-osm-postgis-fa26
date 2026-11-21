@@ -1,11 +1,12 @@
--- Q
+
 -- Query 4: Stream Density by Nature Reserve
 -- Purpose: Calculate stream density (km per sq km)
 -- within each Colorado nature reserve.
 
 WITH nature_reserves AS (
     SELECT
-        name AS nat_area_name,
+        gid AS reserve_id,
+        osm_id AS nat_area_name,
         geom,
         ST_Area(geom::geography) / 1000000.0
             AS nat_area_sq_km
@@ -18,6 +19,7 @@ WITH nature_reserves AS (
 
 stream_metrics AS (
     SELECT
+        nr.reserve_id,
         nr.nat_area_name,
         nr.nat_area_sq_km,
 
@@ -33,20 +35,22 @@ stream_metrics AS (
         nature_reserves AS nr
 
     JOIN
-    waterways AS s
-    ON ST_Intersects(s.geom, nr.geom)
+        waterways AS s
+        ON ST_Intersects(s.geom, nr.geom)
 
-WHERE
-    s.fclass = 'stream'
-    AND s.geom IS NOT NULL
+    WHERE
+        s.fclass = 'stream'
+        AND s.geom IS NOT NULL
 
     GROUP BY
+        nr.reserve_id,
         nr.nat_area_name,
         nr.nat_area_sq_km,
         nr.geom
 )
 
 SELECT
+    reserve_id,
     nat_area_name,
     total_stream_length_km,
     nat_area_sq_km,
